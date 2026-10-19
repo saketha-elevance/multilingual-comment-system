@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Multilingual Comment System</title>
+<style>
+*{box-sizing:border-box;font-family:Inter,Arial,sans-serif}
+body{background:#0f172a;color:#fff;margin:0;padding:20px}
+.container{max-width:900px;margin:auto;background:#1e293b;padding:20px;border-radius:16px}
+h1{text-align:center}
+.top{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+select,input,textarea{padding:10px;border-radius:8px;border:none;width:100%;background:#334155;color:#fff;margin-top:8px}
+textarea{height:80px;resize:none}
+button{background:#3b82f6;color:#fff;border:none;padding:9px 14px;border-radius:8px;cursor:pointer;margin:4px 2px}
+button:hover{opacity:.85}
+.comment{background:#0f172a;padding:14px;border-radius:12px;margin:12px 0;border-left:4px solid #3b82f6}
+.reply{margin-left:40px;border-color:#10b981}
+.header{display:flex;align-items:center;gap:10px}
+.avatar{width:42px;height:42px;border-radius:50%;object-fit:cover}
+.meta{font-size:12px;color:#94a3b8}
+.actions{margin-top:8px;font-size:13px}
+.flagged{background:#7f1d1d;border-color:red}
+.badge{background:#f59e0b;color:#000;padding:2px 6px;border-radius:6px;font-size:11px}
+.tabs{display:flex;gap:8px;margin-top:15px}
+.tab{background:#334155}
+.active{background:#3b82f6}
+.log{background:#020617;padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:200px;overflow:auto}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>🌍 Advanced Multilingual Comment System</h1>
+<div class="top">
+<div><label>Your Name</label><input id="user" value="saketha" placeholder="username"></div>
+<div><label>Language</label><select id="lang"><option value="en">English</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="es">Spanish</option><option value="fr">French</option></select></div>
+<div><label>Location</label><input id="loc" value="Warangal, Telangana"></div>
+</div>
+
+<textarea id="text" placeholder="Write a comment... Use @saketha @john to mention"></textarea>
+<div id="mentionBox"></div>
+<div id="captchaBox" style="display:none">CAPTCHA: What is 5 + 3 ? <input id="captcha" style="width:80px" placeholder="?"><button onclick="verifyCaptcha()">Verify</button></div>
+<button onclick="postComment()">Post Comment</button>
+<p id="msg" style="color:#f87171"></p>
+
+<div class="top">
+<select id="sort" onchange="render()"><option value="newest">Sort: Newest</option><option value="oldest">Oldest</option><option value="liked">Most Liked</option><option value="relevant">Most Relevant</option></select>
+<select id="translateTo" onchange="render()"><option value="en">Translate to: English</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="es">Spanish</option><option value="fr">French</option></select>
+</div>
+
+<div class="tabs">
+<button class="tab active" onclick="showTab('comments',this)">Comments</button>
+<button class="tab" onclick="showTab('history',this)">History / Logs</button>
+<button class="tab" onclick="showTab('moderation',this)">Moderation / Reports</button>
+</div>
+
+<div id="commentsTab"><div id="list"></div></div>
+<div id="historyTab" style="display:none"><h3>Complete Comment History</h3><div class="log" id="historyLog"></div></div>
+<div id="moderationTab" style="display:none"><h3>Report Logs & Moderation Records</h3><div class="log" id="modLog"></div><button onclick="clearFlags()">Admin: Clear All Flags</button></div>
+
+</div>
+<script>
+let comments=JSON.parse(localStorage.getItem('adv_comments')||'[]');
+let history=JSON.parse(localStorage.getItem('adv_hist')||'[]');
+let reports=JSON.parse(localStorage.getItem('adv_reports')||'[]');
+let postCount=0, lastPostTime=0, captchaPassed=false;
+const abusive=["badword","idiot","stupid","fuck","shit","damn","bitch"];
+const users=["saketha","john","priya","rahul","anusha"];
+
+function logHist(t){history.push(new Date().toLocaleString()+" - "+t);localStorage.setItem('adv_hist',JSON.stringify(history));}
+function logMod(t){reports.push(t);localStorage.setItem('adv_reports',JSON.stringify(reports));}
+
+function translateText(text,to){
+ // Simulated built-in translate (offline demo) + fail handling
+ try{
+  if(to==='hi') return "[HI] "+text;
+  if(to==='te') return "[TE] "+text+" (తెలుగు)";
+  if(to==='es') return "[ES] "+text;
+  if(to==='fr') return "[FR] "+text;
+  return text;
+ }catch(e){ return text+" [Translation Failed]"; }
+}
+
+function checkSpam(txt){
+ let lower=txt.toLowerCase();
+ if(abusive.some(w=>lower.includes(w))) return "Blocked: Abusive / Profanity word detected";
+ if(/(http|www\.|\.com|\.in)/.test(lower)) return "Blocked: Malicious / External link not allowed";
+ if(comments.some(c=>c.text===txt)) return "Blocked: Duplicate comment";
+ if((txt.match(/[!@#$%^&*]/g)||[]).length>8) return "Blocked: Too many special characters";
+ if((txt.match(/😀|😂|❤️|🔥/g)||[]).length>5) return "Blocked: Emoji spam";
+ if(Date.now()-lastPostTime<5000) return "Blocked: Flooding - wait 5 sec. Rate Limit";
+ return null;
+}
+
+function postComment(){
+ let txt=document.getElementById('text').value.trim();
+ let user=document.getElementById('user').value||'guest';
+ let loc=document.getElementById('loc').value||'Unknown';
+ if(!txt) return show("Write a comment first");
+ let err=checkSpam(txt);
+ if(err) return show(err);
+ postCount++;
+ if(postCount>=3 && !captchaPassed){document.getElementById('captchaBox').style.display='block';return show("CAPTCHA required after 3 posts");}
+ let id=Date.now();
+ let c={id,user,loc,text:txt,origLang:document.getElementById('lang').value,likes:0,dislikes:0,time:new Date().toLocaleString(),edited:false,parent:null,replies:[],deleted:false,reported:false,flagReason:''};
+ comments.push(c); lastPostTime=Date.now(); logHist(`User ${user} posted comment ID ${id}: ${txt}`); save(); document.getElementById('text').value=''; render(); show("Posted successfully ✓",true);
+}
+function verifyCaptcha(){if(document.getElementById('captcha').value=='8'){captchaPassed=true;document.getElementById('captchaBox').style.display='none';show("CAPTCHA Passed ✓",true);}else show("Wrong CAPTCHA");}
+function show(m,ok){let el=document.getElementById('msg');el.style.color=ok?'#4ade80':'#f87171';el.innerText=m;}
+
+function save(){localStorage.setItem('adv_comments',JSON.stringify(comments));}
+function render(){
+ let sort=document.getElementById('sort').value;
+ let to=document.getElementById('translateTo').value;
+ let list=[...comments];
+ if(sort==='newest') list.sort((a,b)=>b.id-a.id);
+ if(sort==='oldest') list.sort((a,b)=>a.id-b.id);
+ if(sort==='liked') list.sort((a,b)=>b.likes-a.likes);
+ if(sort==='relevant') list.sort((a,b)=>(b.likes-b.dislikes)-(a.likes-a.dislikes));
+ document.getElementById('list').innerHTML=list.map(c=>card(c,to)).join('')||'<p>No comments yet</p>';
+ document.getElementById('historyLog').innerText=history.join("\n")||'No history';
+ document.getElementById('modLog').innerText=reports.join("\n")||'No reports - Community Safe';
+}
+function card(c,to,parent){
+ let translated=translateText(c.text,to);
+ let canEdit=(Date.now()-c.id)<300000; // 5 min
+ let displayText=c.deleted?"[Deleted Comment - Replies Preserved]":translated;
+ let mentions=c.text.replace(/@(\w+)/g,'<b style="color:#60a5fa">@$1</b>');
+ return `<div class="comment ${c.reported?'flagged':''} ${parent?'reply':''}">
+ <div class="header"><img class="avatar" src="https://i.pravatar.cc/80?u=${c.user}"><div><b>@${c.user}</b> ${c.edited?'<span class="badge">Edited</span>':''} ${c.reported?'<span class="badge">⚠️ Flagged for Admin Review</span>':''}<div class="meta">📍 ${c.loc} • ${c.time} • Lang: ${c.origLang}</div></div></div>
+ <p>${displayText}<br><small style="color:#94a3b8">Original: ${mentions}</small></p>
+ <div class="actions">
+ <button onclick="like(${c.id})">👍 ${c.likes}</button>
+ <button onclick="dislike(${c.id})">👎 ${c.dislikes}</button>
+ <button onclick="replyTo(${c.id})">Reply</button>
+ <button onclick="translateOne(${c.id})">🌐 Translate</button>
+ ${canEdit && !c.deleted?`<button onclick="editC(${c.id})">Edit</button><button onclick="delC(${c.id})">Delete (5 min)</button>`:''}
+ <button onclick="reportC(${c.id})">🚩 Report</button>
+ </div>
+ <div id="r-${c.id}"></div>
+ ${c.replies.map(r=>card(r,to,c.id)).join('')}
+ </div>`;
+}
+function find(id,arr=comments){for(let c of arr){if(c.id===id)return c;let f=find(id,c.replies);if(f)return f;}return null;}
+function like(id){let c=find(id);c.likes++;save();render();}
+function dislike(id){let c=find(id);c.dislikes++;save();render();} // Dislike does NOT auto-delete
+function replyTo(id){let t=prompt("Reply:");if(!t)return;let parent=find(id);let rep={id:Date.now(),user:document.getElementById('user').value,loc:document.getElementById('loc').value,text:t,origLang:'en',likes:0,dislikes:0,time:new Date().toLocaleString(),edited:false,replies:[],deleted:false};parent.replies.push(rep);logHist(`Reply to ${id} by ${rep.user}`);save();render();}
+function editC(id){let c=find(id);if(c.editing)return alert("Simultaneous edit blocked - already editing");c.editing=true;let n=prompt("Edit comment:",c.text);c.editing=false;if(!n)return;c.text=n;c.edited=true;logHist(`Edited comment ${id}`);save();render();}
+function delC(id){let c=find(id);if((Date.now()-c.id)>300000) return alert("Edit/Delete time limit 5 mins expired");if(confirm("Delete?")){c.deleted=true;c.text="";logHist(`Deleted ${id}`);save();render();}}
+function reportC(id){let r=prompt("Report reason: spam / harassment / offensive");if(!r)return;let c=find(id);if(c.reported) return alert("Already reported - Duplicate report blocked");c.reported=true;c.flagReason=r;logMod(`${new Date().toLocaleString()} - Comment ${id} by ${c.user} reported for ${r} - Flagged for Admin Review`);save();render();alert("Reported & flagged for Admin Review. Not auto-deleted.");}
+function translateOne(id){alert("Translated: "+translateText(find(id).text,document.getElementById('translateTo').value));}
+function clearFlags(){comments.forEach(c=>{c.reported=false});save();render();}
+function showTab(name,btn){document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');['comments','history','moderation'].forEach(t=>document.getElementById(t+'Tab').style.display=t===name?'block':'none');}
+document.getElementById('text').addEventListener('input',e=>{let v=e.target.value;let last=v.split(' ').pop();if(last.startsWith('@')){document.getElementById('mentionBox').innerHTML=users.filter(u=>u.includes(last.slice(1))).map(u=>`<button onclick="insertMention('${u}')">@${u}</button>`).join(' ')}else document.getElementById('mentionBox').innerHTML='';});
+function insertMention(u){let t=document.getElementById('text');t.value=t.value.replace(/@\w*$/,'@'+u+' ');document.getElementById('mentionBox').innerHTML='';}
+render();
+</script>
+</body>
+</html>
